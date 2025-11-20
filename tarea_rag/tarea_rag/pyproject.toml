@@ -1,0 +1,30 @@
+[project]
+name = "tarea-rag"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Emiliano Marotta",email = "emilianomarott@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-ollama>=0.2.0",
+    "pypdf (>=6.1.1,<7.0.0)",
+    "sentence-transformers (>=5.1.1,<6.0.0)",
+    "faiss-cpu (>=1.12.0,<2.0.0)",
+    "langchain-huggingface (>=0.3.1,<0.4.0)",
+    "pandas (>=2.0.0,<3.0.0)",
+    "flask (>=3.0.0,<4.0.0)",
+    "flask-cors (>=4.0.0,<5.0.0)",
+]
+
+[tool.poetry]
+packages = [
+    { include = "src" },
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
