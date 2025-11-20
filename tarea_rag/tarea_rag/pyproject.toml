@@ -5,7 +5,6 @@ description = ""
 authors = [
     {name = "Emiliano Marotta",email = "emilianomarott@gmail.com"}
 ]
-readme = "README.md"
 requires-python = ">=3.13,<3.15"
 dependencies = [
     "langchain>=0.3.0",
