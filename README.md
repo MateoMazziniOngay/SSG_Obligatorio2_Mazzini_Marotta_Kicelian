@@ -1,15 +1,15 @@
 # Sistema RAG - Análisis de Ventas
 
-Sistema de análisis de datos de ventas utilizando RAG (Retrieval-Augmented Generation) con LLM local.
+Sistema de análisis de datos de ventas utilizando **RAG (Retrieval-Augmented Generation)** con embeddings, vectorstore FAISS y LLM local (Ollama).
 
 ## 📁 Estructura del Proyecto
 
 ```
 src/tarea_rag/
-├── config.py              # Configuración del sistema (rutas, modelo LLM, constantes)
-├── data_loader.py         # Carga y procesamiento de datos CSV
-├── prompts.py             # Plantillas de prompts para el LLM
-├── query_processor.py     # Lógica de procesamiento de consultas
+├── config.py              # Configuración del sistema (rutas, modelos, constantes)
+├── data_loader.py         # Carga de datos CSV y creación de documentos
+├── vectorstore.py         # Gestión del vectorstore FAISS con embeddings
+├── query_processor.py     # Procesamiento de consultas usando RAG
 ├── rag_api.py             # API Flask (endpoints y rutas)
 ├── data/                  # Archivos CSV de datos
 │   ├── Clientes-Tabla 1.csv
@@ -21,40 +21,63 @@ src/tarea_rag/
     └── script.js
 ```
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura RAG
+
+### Flujo del Sistema
+
+1. **Carga de Datos** (`data_loader.py`)
+   - Lee archivos CSV de clientes, productos y ventas
+   - Enriquece datos con JOINs
+   - Crea documentos estructurados con metadata
+
+2. **Vectorización** (`vectorstore.py`)
+   - Genera embeddings usando HuggingFace Transformers
+   - Almacena en vectorstore FAISS
+   - Indexa para búsqueda por similaridad
+
+3. **Consulta RAG** (`query_processor.py`)
+   - Búsqueda semántica de documentos relevantes
+   - Construcción de contexto
+   - Generación de respuesta con LLM
+
+4. **API REST** (`rag_api.py`)
+   - Endpoints Flask
+   - Integración con frontend
 
 ### Módulos Principales
 
 #### 1. **config.py**
-- Centraliza toda la configuración del sistema
-- Define rutas de archivos y carpetas
-- Configuración del modelo LLM
-- Constantes globales
+- Configuración centralizada
+- Parámetros del modelo LLM (Ollama)
+- Configuración de embeddings (HuggingFace)
+- Constantes RAG (top_k, temperature)
 
 #### 2. **data_loader.py**
-- Clase `DataLoader`: Maneja la carga de datos CSV
-- Métodos:
-  - `load_data()`: Carga todos los CSVs y crea DataFrames
-  - `get_schema_info()`: Genera descripción del esquema para el LLM
-  - `get_stats()`: Calcula estadísticas generales
+- Clase `DataLoader`: Carga y procesa datos
+- Método `create_documents()`: Convierte datos en documentos LangChain
+- Crea documentos para:
+  - Ventas individuales con detalles completos
+  - Resúmenes por cliente
+  - Resúmenes por producto
+  - Resúmenes por categoría
 
-#### 3. **prompts.py**
-- Clase `PromptTemplates`: Contiene todas las plantillas de prompts
-- Prompts para:
-  - Análisis de datos (generación de código pandas)
-  - Clasificación de preguntas
-  - Respuestas conversacionales
-  - Manejo de preguntas fuera del dominio
-  - Generación de respuestas en lenguaje natural
+#### 3. **vectorstore.py**
+- Clase `VectorStoreManager`: Gestiona FAISS
+- Inicializa modelo de embeddings multilingüe
+- Métodos:
+  - `create_vectorstore()`: Crea índice vectorial
+  - `similarity_search()`: Búsqueda semántica
+  - `similarity_search_with_score()`: Con scores de similaridad
 
 #### 4. **query_processor.py**
-- Clase `QueryProcessor`: Procesa consultas del usuario
-- Métodos principales:
-  - `classify_question()`: Clasifica el tipo de pregunta
-  - `handle_out_of_domain()`: Maneja preguntas no relacionadas
-  - `handle_conversation()`: Maneja interacciones conversacionales
-  - `handle_data_query()`: Procesa consultas de datos
-  - `process_query()`: Método principal que orquesta el flujo
+- Clase `QueryProcessor`: Procesa consultas con RAG
+- Usa `RetrievalQA` de LangChain
+- Pipeline:
+  1. Usuario hace pregunta
+  2. Búsqueda vectorial de documentos relevantes (top_k)
+  3. Construcción de contexto
+  4. Generación de respuesta con LLM
+  5. Respuesta en lenguaje natural
 
 #### 5. **rag_api.py**
 - API Flask con endpoints REST
@@ -63,12 +86,12 @@ src/tarea_rag/
   - `GET /<filename>`: Archivos estáticos
   - `GET /api/health`: Estado del servicio
   - `GET /api/stats`: Estadísticas generales
-  - `POST /api/query`: Procesar consultas
+  - `POST /api/query`: Procesar consultas RAG
 
 #### 6. **Frontend (static/)**
 - **index.html**: Estructura de la interfaz
 - **styles.css**: Estilos y diseño visual
-- **script.js**: Lógica del cliente (fetch, DOM, eventos)
+- **script.js**: Lógica del cliente
 
 ## 🚀 Ejecución
 
@@ -79,34 +102,44 @@ poetry run python src/tarea_rag/rag_api.py
 
 El servidor estará disponible en: `http://localhost:5001`
 
-## 🎯 Flujo de Trabajo
+## 🎯 Flujo de Trabajo RAG
 
-1. **Usuario hace una pregunta** → Frontend envía POST a `/api/query`
-2. **QueryProcessor clasifica** → ¿Datos, conversación o fuera del dominio?
-3. **Procesamiento según tipo**:
-   - **Datos**: Genera código pandas → Ejecuta → Formatea resultado → Genera respuesta natural
-   - **Conversación**: Responde directamente
-   - **Fuera dominio**: Explica limitaciones
-4. **Respuesta al usuario** → Frontend muestra la respuesta
+1. **Usuario hace pregunta** → Frontend envía POST a `/api/query`
+2. **Búsqueda vectorial** → Sistema busca los 5 documentos más relevantes por similaridad semántica
+3. **Construcción de contexto** → Documentos recuperados se usan como contexto
+4. **Generación LLM** → El LLM genera respuesta basándose en el contexto
+5. **Respuesta al usuario** → Frontend muestra respuesta + fuentes utilizadas
 
 ## 📊 Datos
 
-El sistema analiza tres tipos de datos:
-- **Clientes**: Información de clientes
-- **Productos**: Catálogo de productos con categorías y precios
-- **Ventas**: Transacciones con fechas, cantidades y totales
+El sistema convierte datos CSV en documentos vectorizados:
+- **Clientes**: Información y resúmenes de compras
+- **Productos**: Catálogo con estadísticas de ventas
+- **Ventas**: Transacciones individuales con detalles completos
+- **Agregaciones**: Resúmenes por cliente, producto y categoría
 
 ## 🛠️ Tecnologías
 
-- **Backend**: Flask, Pandas, LangChain, Ollama
-- **Frontend**: HTML5, CSS3, JavaScript (Vanilla)
-- **LLM**: DeepSeek v3.1 (local via Ollama)
+### Backend
+- **Flask**: API REST
+- **Pandas**: Procesamiento de datos
+- **LangChain**: Framework RAG
+- **FAISS**: Vectorstore para búsqueda por similaridad
+- **HuggingFace Transformers**: Generación de embeddings
+- **Ollama**: LLM local (DeepSeek v3.1)
 
-## 📝 Buenas Prácticas Implementadas
+### Frontend
+- **HTML5, CSS3, JavaScript**: Interfaz de usuario
 
-✅ **Separación de responsabilidades**: Cada módulo tiene una única responsabilidad
-✅ **Configuración centralizada**: Fácil modificación de parámetros
-✅ **Reutilización de código**: Clases y métodos bien definidos
-✅ **Frontend modular**: HTML, CSS y JS separados
-✅ **Manejo de errores**: Try-catch y validaciones
-✅ **Documentación**: Docstrings y comentarios claros
+### Modelos
+- **LLM**: DeepSeek v3.1 (vía Ollama)
+- **Embeddings**: paraphrase-multilingual-MiniLM-L12-v2
+
+## 📝 Ventajas del Sistema RAG
+
+✅ **No genera código**: Respuestas directas basadas en información recuperada
+✅ **Búsqueda semántica**: Encuentra información relevante aunque use palabras diferentes
+✅ **Contexto preciso**: Solo usa información relevante de la base de datos
+✅ **Escalable**: Fácil agregar más datos sin cambiar código
+✅ **Transparente**: Muestra las fuentes usadas para cada respuesta
+✅ **Multilingüe**: Embeddings optimizados para español

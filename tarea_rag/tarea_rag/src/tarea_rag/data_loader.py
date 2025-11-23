@@ -3,12 +3,13 @@ Módulo para carga y procesamiento de datos
 """
 import pandas as pd
 from pathlib import Path
-from typing import Tuple
+from typing import List
+from langchain_core.documents import Document
 from tarea_rag.config import DATA_FOLDER, CLIENTES_FILE, PRODUCTOS_FILE, VENTAS_FILE, CSV_SEPARATOR, CSV_SKIPROWS
 
 
 class DataLoader:
-    """Clase para cargar y preparar los datos de ventas"""
+    """Clase para cargar y preparar los datos de ventas para RAG"""
     
     def __init__(self, data_folder: Path = DATA_FOLDER):
         self.data_folder = data_folder
@@ -17,7 +18,7 @@ class DataLoader:
         self.df_ventas = None
         self.df_ventas_full = None
     
-    def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def load_data(self) -> pd.DataFrame:
         """Carga todos los archivos CSV y crea el DataFrame enriquecido"""
         print("Cargando datos...")
         
@@ -42,6 +43,7 @@ class DataLoader:
         self.df_ventas['FechaVenta'] = pd.to_datetime(self.df_ventas['FechaVenta'])
         self.df_ventas['Año'] = self.df_ventas['FechaVenta'].dt.year
         self.df_ventas['Mes'] = self.df_ventas['FechaVenta'].dt.month
+        self.df_ventas['Mes_Nombre'] = self.df_ventas['FechaVenta'].dt.strftime('%B')
         
         # Crear datos enriquecidos con JOINs
         self.df_ventas_full = self._create_enriched_data()
@@ -50,7 +52,7 @@ class DataLoader:
               f"{len(self.df_productos)} productos, "
               f"{len(self.df_ventas)} ventas")
         
-        return self.df_clientes, self.df_productos, self.df_ventas, self.df_ventas_full
+        return self.df_ventas_full
     
     def _create_enriched_data(self) -> pd.DataFrame:
         """Crea DataFrame enriquecido con información de productos y clientes"""
@@ -59,33 +61,116 @@ class DataLoader:
         df_full['Total'] = df_full['Cantidad'] * df_full['Precio']
         return df_full
     
-    def get_schema_info(self) -> str:
-        """Genera descripción del esquema de datos para el LLM"""
+    def create_documents(self) -> List[Document]:
+        """Convierte los datos en documentos para el vectorstore"""
         if self.df_ventas_full is None:
             raise ValueError("Datos no cargados. Ejecuta load_data() primero.")
         
-        return f"""
-ESTRUCTURA DE DATOS DISPONIBLE:
-
-1. df_clientes: {len(self.df_clientes)} registros
-   Columnas: {list(self.df_clientes.columns)}
-
-2. df_productos: {len(self.df_productos)} registros
-   Columnas: {list(self.df_productos.columns)}
-
-3. df_ventas: {len(self.df_ventas)} registros
-   Columnas: {list(self.df_ventas.columns)}
-
-4. df_ventas_full: {len(self.df_ventas_full)} registros (ventas con JOIN)
-   Columnas: {list(self.df_ventas_full.columns)}
-   Incluye: Año, Mes, Total (Cantidad * Precio)
-
-ESTADÍSTICAS:
-- Total ventas: {len(self.df_ventas_full)}
-- Rango de fechas: {self.df_ventas_full['FechaVenta'].min()} a {self.df_ventas_full['FechaVenta'].max()}
-- Total ingresos: ${self.df_ventas_full['Total'].sum():.2f}
-- Categorías: {self.df_ventas_full['Categoria'].unique().tolist()}
+        documents = []
+        
+        # Crear documentos para cada venta con información completa
+        for _, row in self.df_ventas_full.iterrows():
+            content = f"""
+Venta ID: {row['IdVenta']}
+Cliente: {row['NombreCliente']} (ID: {row['IdCliente']})
+Producto: {row['NombreProducto']} (ID: {row['IdProducto']})
+Categoría: {row['Categoria']}
+Fecha: {row['FechaVenta'].strftime('%Y-%m-%d')}
+Año: {row['Año']}
+Mes: {row['Mes']} ({row['Mes_Nombre']})
+Cantidad: {row['Cantidad']} unidades
+Precio unitario: ${row['Precio']:.2f}
+Total: ${row['Total']:.2f}
 """
+            metadata = {
+                'id_venta': int(row['IdVenta']),
+                'id_cliente': int(row['IdCliente']),
+                'nombre_cliente': str(row['NombreCliente']),
+                'id_producto': int(row['IdProducto']),
+                'nombre_producto': str(row['NombreProducto']),
+                'categoria': str(row['Categoria']),
+                'fecha': str(row['FechaVenta'].strftime('%Y-%m-%d')),
+                'año': int(row['Año']),
+                'mes': int(row['Mes']),
+                'mes_nombre': str(row['Mes_Nombre']),
+                'cantidad': int(row['Cantidad']),
+                'precio': float(row['Precio']),
+                'total': float(row['Total'])
+            }
+            documents.append(Document(page_content=content, metadata=metadata))
+        
+        # Agregar documentos resumen por cliente
+        clientes_resumen = self.df_ventas_full.groupby('NombreCliente').agg({
+            'Total': 'sum',
+            'IdVenta': 'count'
+        }).reset_index()
+        
+        for _, row in clientes_resumen.iterrows():
+            content = f"""
+Resumen del Cliente: {row['NombreCliente']}
+Total de compras: {row['IdVenta']} transacciones
+Monto total gastado: ${row['Total']:.2f}
+Promedio por compra: ${row['Total']/row['IdVenta']:.2f}
+"""
+            metadata = {
+                'tipo': 'resumen_cliente',
+                'nombre_cliente': str(row['NombreCliente']),
+                'total_compras': int(row['IdVenta']),
+                'monto_total': float(row['Total'])
+            }
+            documents.append(Document(page_content=content, metadata=metadata))
+        
+        # Agregar documentos resumen por producto
+        productos_resumen = self.df_ventas_full.groupby(['NombreProducto', 'Categoria']).agg({
+            'Cantidad': 'sum',
+            'Total': 'sum',
+            'IdVenta': 'count'
+        }).reset_index()
+        
+        for _, row in productos_resumen.iterrows():
+            content = f"""
+Resumen del Producto: {row['NombreProducto']}
+Categoría: {row['Categoria']}
+Unidades vendidas: {row['Cantidad']}
+Número de ventas: {row['IdVenta']}
+Ingresos totales: ${row['Total']:.2f}
+"""
+            metadata = {
+                'tipo': 'resumen_producto',
+                'nombre_producto': str(row['NombreProducto']),
+                'categoria': str(row['Categoria']),
+                'unidades_vendidas': int(row['Cantidad']),
+                'ingresos_totales': float(row['Total'])
+            }
+            documents.append(Document(page_content=content, metadata=metadata))
+        
+        # Agregar documentos resumen por categoría
+        categorias_resumen = self.df_ventas_full.groupby('Categoria').agg({
+            'Total': 'sum',
+            'Cantidad': 'sum',
+            'IdVenta': 'count'
+        }).reset_index()
+        
+        for _, row in categorias_resumen.iterrows():
+            content = f"""
+Resumen de Categoría: {row['Categoria']}
+Ventas totales: {row['IdVenta']} transacciones
+Unidades vendidas: {row['Cantidad']}
+Ingresos totales: ${row['Total']:.2f}
+"""
+            metadata = {
+                'tipo': 'resumen_categoria',
+                'categoria': str(row['Categoria']),
+                'ventas_totales': int(row['IdVenta']),
+                'ingresos_totales': float(row['Total'])
+            }
+            documents.append(Document(page_content=content, metadata=metadata))
+        
+        print(f"✓ Creados {len(documents)} documentos para el vectorstore")
+        return documents
+        
+        print(f"✓ Creados {len(documents)} documentos para el vectorstore")
+        return documents
     
     def get_stats(self) -> dict:
         """Obtiene estadísticas generales de los datos"""

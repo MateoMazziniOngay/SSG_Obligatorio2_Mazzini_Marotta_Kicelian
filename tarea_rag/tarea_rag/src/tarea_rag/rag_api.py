@@ -17,26 +17,34 @@ import traceback
 
 from tarea_rag.config import STATIC_FOLDER
 from tarea_rag.data_loader import DataLoader
+from tarea_rag.vectorstore import VectorStoreManager
 from tarea_rag.query_processor import QueryProcessor
 
 app = Flask(__name__, static_folder=STATIC_FOLDER)
 CORS(app)  # Permitir CORS para el frontend
 
-# Inicializar cargador de datos
+# Inicializar sistema RAG
+print("\n" + "="*60)
+print("🚀 Inicializando Sistema RAG")
+print("="*60)
+
+# 1. Cargar datos
 data_loader = DataLoader()
-df_clientes, df_productos, df_ventas, df_ventas_full = data_loader.load_data()
+df_ventas_full = data_loader.load_data()
 
-# Obtener esquema de datos
-esquema_datos = data_loader.get_schema_info()
+# 2. Crear documentos
+documents = data_loader.create_documents()
 
-# Inicializar procesador de consultas
-query_processor = QueryProcessor(
-    df_clientes=df_clientes,
-    df_productos=df_productos,
-    df_ventas=df_ventas,
-    df_ventas_full=df_ventas_full,
-    esquema_datos=esquema_datos
-)
+# 3. Crear vectorstore con embeddings
+vectorstore_manager = VectorStoreManager()
+vectorstore_manager.create_vectorstore(documents)
+
+# 4. Inicializar procesador de consultas
+query_processor = QueryProcessor(vectorstore_manager)
+
+print("="*60)
+print("✅ Sistema RAG listo para recibir consultas")
+print("="*60 + "\n")
 
 @app.route('/')
 def index():
